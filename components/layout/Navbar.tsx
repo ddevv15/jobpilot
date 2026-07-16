@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { LayoutGrid } from "lucide-react";
+import { NavbarCTA } from "@/components/layout/NavbarCTA";
 
 const navItems = [
   { label: "Dashboard", href: "/dashboard" },
@@ -32,12 +33,7 @@ export function Navbar() {
           ))}
         </nav>
 
-        <Link
-          href="/login"
-          className="rounded-md bg-text-darker px-4 py-2 text-sm font-medium text-accent-foreground"
-        >
-          Start for free
-        </Link>
+        <NavbarCTA />
       </div>
     </header>
   );

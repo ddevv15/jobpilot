@@ -36,10 +36,8 @@
 │   ├── layout.tsx                          → Root layout, PostHog provider
 │   ├── page.tsx                            → Homepage
 │   ├── (auth)/
-│   │   ├── login/
-│   │   │   └── page.tsx                   → Login page
-│   │   └── callback/
-│   │       └── page.tsx                   → OAuth callback handler
+│   │   └── login/
+│   │       └── page.tsx                   → Login page — redirects to /dashboard if already signed in
 │   ├── dashboard/
 │   │   └── page.tsx                       → Main dashboard
 │   ├── profile/
@@ -49,12 +47,16 @@
 │   │   └── [id]/
 │   │       └── page.tsx                   → Individual job details page
 │   └── api/
+│       ├── auth/
+│       │   ├── callback/route.ts          → Server-side OAuth code exchange (sets httpOnly refresh cookie)
+│       │   └── refresh/route.ts           → Session refresh endpoint (createRefreshAuthRouter)
 │       ├── agent/
 │       │   ├── find/route.ts              → Trigger Adzuna job discovery
 │       │   └── research/route.ts          → Trigger company research agent
 │       ├── resume/
 │       │   ├── generate/route.ts          → Generate base resume PDF from profile
 │       │   └── extract/route.ts           → Extract profile data from uploaded resume PDF
+├── proxy.ts                                 → updateSession() + protected route redirects (Next.js 16 renamed middleware.ts → proxy.ts)
 ├── agent/
 │   ├── adzuna.ts                          → Adzuna API job discovery + GPT-4o scoring
 │   ├── research.ts                        → Company research — Browserbase + Stagehand + GPT-4o
@@ -62,6 +64,7 @@
 │   ├── extractor.ts                       → GPT-4o job description extraction + structuring
 │   └── types.ts                           → Agent-specific TypeScript types
 ├── actions/
+│   ├── auth.ts                            → OAuth initiation (initiateOAuth) via createAuthActions
 │   ├── profile.ts                         → Profile save + update
 │   └── jobs.ts                            → Job status updates
 ├── components/
@@ -293,47 +296,33 @@ Access: authenticated users only, own files only.
 - Methods: Google OAuth, GitHub OAuth
 - Protected routes: /dashboard, /profile, /find-jobs, /find-jobs/[id]
 - Public routes: /, /login
-- Middleware in middleware.ts checks session on every protected route
+- OAuth is server-side PKCE: `actions/auth.ts` initiates via `createAuthActions().signInWithOAuth()`, `app/api/auth/callback/route.ts` exchanges the code and sets the httpOnly refresh cookie
+- `proxy.ts` (Next.js 16 renamed `middleware.ts` → `proxy.ts`; the exported function is named `proxy`, not `middleware`) calls `updateSession()` on every request so Server Components see fresh cookies, then redirects unauthenticated requests away from protected routes to /login, and redirects authenticated requests away from /login to /dashboard
 - On login → redirect to /dashboard
 
 ---
 
 ## InsForge Client Pattern
 
-Two separate InsForge instances — never mix them:
+Two separate InsForge instances — never mix them. SDK lives under `@insforge/sdk`; SSR helpers come from `@insforge/sdk/ssr`, and the middleware-only helper comes from `@insforge/sdk/ssr/middleware`.
 
 ```typescript
 // lib/insforge-client.ts
-// Browser-side — used in client components for auth state
-import { createBrowserClient } from "@insforge/ssr";
-export const insforge = createBrowserClient(
-  process.env.NEXT_PUBLIC_INSFORGE_URL!,
-  process.env.NEXT_PUBLIC_INSFORGE_ANON_KEY!,
-);
+// Browser-side — used in client components for auth state, Storage, Realtime
+import { createBrowserClient } from "@insforge/sdk/ssr";
+export const insforge = createBrowserClient();
 
 // lib/insforge-server.ts
-// Server-side — used in API routes, Server Actions, agent code
-import { createServerClient } from "@insforge/ssr";
+// Server-side — used in Server Components, Route Handlers, Server Actions, agent code
 import { cookies } from "next/headers";
+import { createServerClient } from "@insforge/sdk/ssr";
 
-export const createInsforgeServer = async () => {
-  const cookieStore = await cookies();
-  return createServerClient(
-    process.env.NEXT_PUBLIC_INSFORGE_URL!,
-    process.env.NEXT_PUBLIC_INSFORGE_ANON_KEY!,
-    {
-      cookies: {
-        getAll: () => cookieStore.getAll(),
-        setAll: (cookiesToSet) => {
-          cookiesToSet.forEach(({ name, value, options }) =>
-            cookieStore.set(name, value, options),
-          );
-        },
-      },
-    },
-  );
-};
+export async function createInsforgeServer() {
+  return createServerClient({ cookies: await cookies() });
+}
 ```
+
+Auth mutations (sign-in, sign-up, sign-out, OAuth init/exchange) never run through either instance above — they run server-side via `createAuthActions()` from `@insforge/sdk/ssr` so the refresh token can be written as an httpOnly cookie. See `context/library-docs.md`'s InsForge Auth section for the full pattern.
 
 ---
 
@@ -421,6 +410,7 @@ Rules the AI agent must never violate:
 - Agent code in `/agent` never imports from `/components` or `/actions`.
 - Server Actions never call agent functions. Agent functions are only called from API routes.
 - All InsForge server-side writes use `createInsforgeServer()` — never the browser client.
+- Auth mutations (sign-in, sign-up, sign-out, OAuth) always run server-side via `createAuthActions()` — never from the browser client.
 - No hardcoded hex values or raw Tailwind color classes in components — use CSS variables from ui-tokens.md.
 - Every Stagehand action is wrapped in try/catch. Failures are logged to agent_logs, never thrown to crash the run.
 - Company research always returns a dossier — even if browser research fails, GPT-4o synthesizes from company name and job description alone. Never return empty.

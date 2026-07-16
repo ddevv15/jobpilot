@@ -28,52 +28,40 @@ Never rely on general training knowledge alone for library APIs — they change 
 
 ## InsForge
 
-**Check first:** Check AGENTS.md for an installed InsForge skill. If an InsForge MCP server is configured — use it. The skill/MCP will have the latest API patterns.
+**Check first:** Check AGENTS.md for an installed InsForge skill. No InsForge MCP server is configured for this project — use the `insforge` skill's reference docs (`auth/sdk-integration.md`, `auth/ssr-integration.md`, `database/sdk-integration.md`, `storage/sdk-integration.md`) for the latest API patterns before falling back to this file.
+
+### Package
+
+The SDK lives entirely under `@insforge/sdk` — there is no separate `@insforge/ssr` package. For Next.js SSR, import the SSR helpers from `@insforge/sdk/ssr` and the middleware-only helper from `@insforge/sdk/ssr/middleware`.
 
 ### Client vs Server
 
 Two separate instances — never mix them:
 
 ```typescript
-// lib/insforge-client.ts — browser context only
-import { createBrowserClient } from "@insforge/ssr";
+// lib/insforge/client.ts — browser context only (Client Components)
+import { createBrowserClient } from "@insforge/sdk/ssr";
 
-export const insforge = createBrowserClient(
-  process.env.NEXT_PUBLIC_INSFORGE_URL!,
-  process.env.NEXT_PUBLIC_INSFORGE_ANON_KEY!,
-);
+export const insforge = createBrowserClient();
 ```
 
 ```typescript
-// lib/insforge-server.ts — server context only
-import { createServerClient } from "@insforge/ssr";
+// lib/insforge/server.ts — server context only (Server Components, Route Handlers, Server Actions)
 import { cookies } from "next/headers";
+import { createServerClient } from "@insforge/sdk/ssr";
 
-export const createInsforgeServer = async () => {
-  const cookieStore = await cookies();
-  return createServerClient(
-    process.env.NEXT_PUBLIC_INSFORGE_URL!,
-    process.env.NEXT_PUBLIC_INSFORGE_ANON_KEY!,
-    {
-      cookies: {
-        getAll: () => cookieStore.getAll(),
-        setAll: (cookiesToSet) => {
-          cookiesToSet.forEach(({ name, value, options }) =>
-            cookieStore.set(name, value, options),
-          );
-        },
-      },
-    },
-  );
-};
+export async function createInsforgeServer() {
+  return createServerClient({ cookies: await cookies() });
+}
 ```
 
 **Rules:**
 
-- Browser client — Client Components, browser-side auth state, realtime subscriptions
-- Server client — Server Components, API routes, Server Actions, agent functions
+- Browser client (`createBrowserClient()`) — Client Components, Storage/Realtime calls, read-only auth (`getCurrentUser()`, `getProfile()`)
+- Server client (`createServerClient()`) — Server Components, Route Handlers, Server Actions
 - Never use browser client in server context
 - Never use server client in browser context
+- Auth mutations (sign-in, sign-up, sign-out, OAuth init/exchange) never run on the browser client — use `createAuthActions()` server-side instead
 
 ---
 
@@ -82,34 +70,75 @@ export const createInsforgeServer = async () => {
 ```typescript
 // Get current user in server context
 const insforge = await createInsforgeServer();
-const {
-  data: { user },
-  error,
-} = await insforge.auth.getUser();
-if (!user) redirect("/login");
+const { data, error } = await insforge.auth.getCurrentUser();
+if (!data.user) redirect("/login");
 ```
+
+Sign-in, sign-up, sign-out, and OAuth mutations run server-side via `createAuthActions()` so the refresh token can be written as an httpOnly cookie:
+
+```typescript
+// app/actions/auth.ts
+"use server";
+import { cookies } from "next/headers";
+import { createAuthActions } from "@insforge/sdk/ssr";
+
+export async function initiateOAuth(provider: "google" | "github") {
+  const cookieStore = await cookies();
+  const auth = createAuthActions({ cookies: cookieStore });
+  const { data, error } = await auth.signInWithOAuth(provider, {
+    redirectTo: new URL(
+      "/api/auth/callback",
+      process.env.NEXT_PUBLIC_APP_URL,
+    ).toString(),
+    skipBrowserRedirect: true,
+  });
+  if (error || !data.url || !data.codeVerifier) {
+    throw new Error(error?.message ?? "OAuth init failed");
+  }
+  cookieStore.set("insforge_code_verifier", data.codeVerifier, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    maxAge: 600,
+  });
+  redirect(data.url);
+}
+```
+
+Callback exchange happens server-side in `app/api/auth/callback/route.ts` via `auth.exchangeOAuthCode(code, codeVerifier)`. Add `/api/auth/refresh` with `createRefreshAuthRouter()`, and call `updateSession()` from `@insforge/sdk/ssr/middleware` in `proxy.ts` (Next.js 16 renamed `middleware.ts` → `proxy.ts`; exported function must be named `proxy`) so Server Components see fresh cookies before rendering. `updateSession()` resolves `{ refreshed, accessToken, error }` — there is no `user` field, so treat a non-null `accessToken` as "logged in" for redirect checks.
+
+**Rules:**
+
+- Cookie names are fixed by the SDK: `insforge_access_token` (browser-readable) and `insforge_refresh_token` (httpOnly) — don't invent custom cookie names
+- OAuth is PKCE-based with two separate redirect URLs: the provider-facing callback (`https://<project>.insforge.app/api/auth/oauth/<provider>/callback`, configured in Google/GitHub) and the app-facing `redirectTo` passed to `signInWithOAuth()` — never confuse the two
+- The app's callback URL must be added to `allowedRedirectUrls` via `npx @insforge/cli config apply`, or the OAuth redirect will be rejected
+- `oAuthProviders` enabled for this project (confirmed via `npx @insforge/cli metadata --json`): `github`, `google`
+- The method is `getCurrentUser()` — there is no `getUser()`
 
 ---
 
 ### DB Queries
 
+Note the `.database` namespace — it's `insforge.database.from(...)`, not `insforge.from(...)`.
+
 ```typescript
 // Read
-const { data, error } = await insforge
+const { data, error } = await insforge.database
   .from("jobs")
   .select("*")
   .eq("user_id", user.id)
   .order("found_at", { ascending: false });
 
-// Insert
-const { data, error } = await insforge
+// Insert — MUST use array format
+const { data, error } = await insforge.database
   .from("jobs")
-  .insert({ user_id: user.id, title, company, match_score })
+  .insert([{ user_id: user.id, title, company, match_score }])
   .select()
   .single();
 
 // Update
-const { error } = await insforge
+const { error } = await insforge.database
   .from("jobs")
   .update({ company_research: dossier })
   .eq("id", jobId)
@@ -118,9 +147,11 @@ const { error } = await insforge
 
 **Rules:**
 
+- Always go through `insforge.database.from(...)` — not `insforge.from(...)`
 - Always scope queries to `user_id` — never query without user filter
 - Always handle the `error` return — never assume success
 - Use `.single()` when expecting exactly one row
+- `.insert()` always takes an array, even for a single record
 
 ---
 
@@ -135,12 +166,8 @@ const { data, error } = await insforge.storage
     upsert: true, // overwrites existing file
   });
 
-// Get public URL
-const { data } = insforge.storage
-  .from("resumes")
-  .getPublicUrl(`${userId}/resume.pdf`);
-
-const url = data.publicUrl;
+// data.url is the public/display URL — no separate getPublicUrl() call exists
+const url = data.url;
 ```
 
 **Storage paths:**
@@ -150,8 +177,9 @@ const url = data.publicUrl;
 **Rules:**
 
 - Always use `upsert: true` for base resume uploads — overwrites existing file
-- Always save the public URL back to the DB after upload
+- Always save both `data.url` (display) AND `data.key` (required for download/delete) back to the DB after upload — there is no `getPublicUrl()` method in the current SDK
 - Never write files to disk — always upload buffer directly to storage
+- In Client Components, use `createBrowserClient()` from `@insforge/sdk/ssr` so uploads carry the signed-in user's access token for Storage RLS
 
 ---
 

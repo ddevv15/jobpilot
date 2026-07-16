@@ -114,3 +114,28 @@ Last updated: 2026-07-08
 
 **Pattern notes:**
 Wraps the static marketing screenshots (`jobs-lists.png`, `agnet-log.png`) from `public/images/`. These are pre-made design assets, not live components — never rebuild them as coded UI.
+
+### Login page (split marketing panel + OAuth card)
+
+File: `app/(auth)/login/page.tsx`
+Last updated: 2026-07-09
+
+| Property         | Class                                                                 |
+| ----------------- | ---------------------------------------------------------------------- |
+| Background        | `bg-surface` (card), `bg-background` (page), `bg-hero-gradient` (left panel) |
+| Border            | `border border-border`                                               |
+| Border radius     | `rounded-2xl` (outer card), `rounded-md` (buttons), `rounded-full` (badge) |
+| Shadow            | `shadow-[0px_1px_3px_rgba(0,0,0,0.1),0px_1px_2px_-1px_rgba(0,0,0,0.1)]` (matches Cards token in ui-tokens.md) |
+| Text — primary    | `text-text-primary` (headline, wordmark, button label)                |
+| Text — secondary  | `text-text-secondary` ("Welcome to" label, subheading, badge label)   |
+| Text — muted      | `text-text-muted` (bottom caption)                                    |
+| Spacing           | `p-6 lg:p-10` (page), `px-16 py-16` (left panel), `px-6 py-16` (right panel), `px-4 py-3` (buttons — taller than the standard `py-2` Secondary Button token) |
+| Hover state       | `hover:bg-surface-secondary` (OAuth buttons)                          |
+| Accent usage      | `text-accent` on badge icon and both OAuth provider icons              |
+| Left headline     | `text-4xl font-bold text-text-primary md:text-5xl` (matches Hero heading scale) |
+| Trust badge       | `inline-flex w-fit items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text-secondary` + `ShieldCheck` icon |
+| Wordmark heading  | `text-3xl font-bold text-text-primary`                                |
+| Error banner      | `rounded-md bg-accent-muted px-3 py-2 text-xs text-text-secondary`   |
+
+**Pattern notes:**
+Reuses `bg-hero-gradient` (the same mesh-gradient utility as the homepage Hero/CTA panels) for the left marketing panel instead of inventing a new gradient. Each OAuth button is its own `<form action={initiateOAuth.bind(null, provider)}>` wrapping a `<button type="submit">` — keeps the page a Server Component (no `"use client"` needed) since the Server Action is bound per-provider rather than handled with an `onClick`. Google and GitHub are represented with generic lucide icons (`Globe`, `GitFork`) in accent purple rather than brand-colored logo marks — `lucide-react@1.23.0` doesn't ship brand/logo icons, and this reads cleaner than mixed-brand-color icons next to the purple accent system anyway. Below the `lg` breakpoint the left panel is dropped entirely and the card collapses to just the sign-in column.

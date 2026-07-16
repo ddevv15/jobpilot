@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { ShieldCheck, Globe, GitFork } from "lucide-react";
 import { createInsforgeServer } from "@/lib/insforge-server";
 import { initiateOAuth } from "@/actions/auth";
+import { getPostHogClient } from "@/lib/posthog-server";
 
 const ERROR_MESSAGES: Record<string, string> = {
   oauth_init_failed: "Could not start sign in. Please try again.",
@@ -18,6 +19,13 @@ export default async function LoginPage({ searchParams }: Props) {
   const insforge = await createInsforgeServer();
   const { data } = await insforge.auth.getCurrentUser();
   if (data.user) redirect("/dashboard");
+
+  const posthog = getPostHogClient();
+  posthog.capture({
+    distinctId: "anonymous",
+    event: "sign_in_page_viewed",
+  });
+  await posthog.flush();
 
   const { error } = await searchParams;
   const errorMessage = error ? ERROR_MESSAGES[error] : undefined;

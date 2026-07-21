@@ -6,9 +6,9 @@ Update this file after every completed feature. Any AI agent reading this should
 
 ## Current Status
 
-**Phase:** Phase 1 — Foundation
-**Last completed:** 03 PostHog Initialization
-**Next:** 04 Database Schema
+**Phase:** Phase 1 — Foundation complete
+**Last completed:** 04 Database Schema
+**Next:** 05 Profile Page — Full UI (Phase 2)
 
 ---
 
@@ -19,7 +19,7 @@ Update this file after every completed feature. Any AI agent reading this should
 - [x] 01 Homepage
 - [x] 02 Auth
 - [x] 03 PostHog Initialization
-- [ ] 04 Database Schema
+- [x] 04 Database Schema
 
 ### Phase 2 — Profile Page
 
@@ -70,6 +70,26 @@ Update this file after every completed feature. Any AI agent reading this should
   - Dashboard placeholder card padding corrected from `p-8` to the documented Cards token `p-6`.
   - `app/dashboard/page.tsx` now wraps `insforge.auth.getCurrentUser()` in try/catch; `redirect()` is called *outside* the try block (its own internal throw would otherwise be swallowed and logged as a false error).
   - Verified via curl + Playwright: unauthenticated `/dashboard` still 307s to `/login`; `/login?error=sign_out_failed` renders the new error banner correctly. Authenticated `/dashboard` render is still unverified in a real browser — no live OAuth credentials in this environment (same limitation as the original 02 Auth verification).
+
+- **04 Database Schema**: two migrations — `20260721110500_create-schema.sql` (4 tables, RLS, grants, indexes, `updated_at` trigger) and `20260721111346_storage-resumes-rls.sql` (storage policies). Plus the private `resumes` bucket and `types/index.ts`. Backend was a clean slate — zero tables, zero buckets — before this feature.
+  - **Ownership keys on `auth.users(id)` directly on all four tables**, not on `profiles(id)` as `architecture.md` originally stated. Every policy is a direct `user_id = (SELECT auth.uid())` check with no cross-table lookup, and — the real reason — it removes a hidden ordering dependency: with FKs pointing at `profiles`, no job could be inserted until a profile row existed, which `build-plan.md` never states. `architecture.md`'s three Notes columns were corrected.
+  - **`is_complete` is the only persisted completion state.** `build-plan.md:113` says percentage and missing fields are "calculated and saved", but storing them means recomputing on every write and going stale whenever the required-field rules change. Both are derived in app code in Phase 2 instead.
+  - **No "tailored fields" on `jobs`** despite `build-plan.md:73` asking for them — resume tailoring, cover letters, and score recalculation are all explicitly out of scope (`project-overview.md:189-191`), and `architecture.md`'s `jobs` schema has no such columns. Recorded rather than built.
+  - **No `CHECK` constraint on `jobs.job_type`** — deliberate exception to the enum-constraint rule. `library-docs.md:264` maps it straight from Adzuna's `contract_type`, which emits values (`permanent`, `part_time`) outside architecture.md's `fulltime/parttime/contract` set. A constraint there would reject live Adzuna rows in Feature 10.
+  - **Minimal grant surface:** `REVOKE ALL` from `anon`/`authenticated` first (InsForge pre-grants broad DML on public tables), then grant back only what features perform. No `DELETE` on any table — dismissing jobs is out of scope. `agent_logs` is append-only (SELECT/INSERT). Verified: `anon` holds **zero** privileges on all four tables.
+  - **Storage isolation was a real gap, now closed.** `storage.objects` came with RLS **disabled** and zero policies on this backend (v2.2.6) — contradicting InsForge's own docs, which claim RLS ships enabled. A `--private` bucket alone therefore meant "any signed-in user", not `architecture.md:289`'s "own files only". Added path-scoped policies where the first path segment of the key must equal the JWT `sub`, so the `{user_id}/` prefix is now load-bearing. Policies are scoped to `bucket = 'resumes'`, so any future bucket is denied until it gets its own.
+  - **`library-docs.md`'s Storage section documented an API that does not exist** — same drift class as the 02 Auth discovery. Real signature is `upload(path, file)`: no options object, no `contentType`, and **no `upsert`**. The documented `upsert: true` does not overwrite — the backend **auto-renames on key collision**. Consequences: `resume_pdf_key` had to be added to `profiles` (the key is not derivable from the user id), and Features 06/08 must `remove()` the old object before uploading or orphaned files accumulate. Section rewritten against `npx @insforge/cli docs storage typescript`.
+  - **Verified against the live catalog, not the CLI's success message:** 4 tables with `rowsecurity=true`, 11 policies with correct `USING`/`WITH CHECK` predicates in subquery form and no `USING (true)`, 12 indexes, the `profiles_updated_at` trigger, 11 CHECK constraints, `storage.objects` RLS on with 4 policies, `anon` privilege count = 0, security advisor clean, `tsc --noEmit` exit 0.
+  - **RLS proven under real authenticated sessions — 12/12 assertions passed.** The earlier "not verified" gap is now closed. Because OAuth credentials still aren't available, the test used email/password signup instead; because production enforces email verification (and SMTP is disabled, so verification can never complete), the test ran on a **throwaway schema-only backend branch** (`rls-verify`) with verification disabled *on the branch only*. Production auth config was never modified — re-confirmed afterwards by live probe (`requireEmailVerification: true`). Branch deleted; production user count unchanged at 2. Results:
+    - User A can insert and read back its own `profiles`, `jobs`, and `agent_runs` rows.
+    - User B sees **zero** rows across all three tables, including when explicitly filtering `?user_id=eq.<A's id>` — RLS filters silently rather than erroring, which is the correct shape.
+    - User B is **blocked from inserting** a `jobs` row owned by A — confirms `WITH CHECK`, the half of RLS that `SELECT` testing alone cannot detect.
+    - `DELETE` returns **403** — confirms the narrowed grant surface denies the privilege before any policy is consulted (a different mechanism from the row filtering above).
+    - `anon` returns **401** — confirms zero privileges.
+  - **Email/password auth is currently non-functional on this project** — `require_email_verification = true` while `[auth.smtp] enabled = false`, so a verification email can never be sent and signup can never complete. Harmless today (the app only uses OAuth), but it blocks any future email/password path and is why the branch was needed for testing.
+  - **Turbopack root question resolved — the setting is correct and must stay.** `next.config.ts`'s `turbopack.root` exists because there is a stray `package-lock.json` in the user's **home directory** (`/Users/ddevv15/package-lock.json`). Turbopack infers the workspace root by walking up for lockfiles, so without the explicit root it would resolve to `/Users/ddevv15` and trace the entire home folder. Not leftover cruft — do not remove. Two cosmetic notes: `path.join(__dirname)` is a redundant single-arg wrapper (plain `__dirname` is equivalent), and deleting the stray home-directory lockfile would make the setting unnecessary.
+  - **`.mcp.json` added to `.gitignore`** — it carries a full-access InsForge admin API key and was untracked but unignored, one `git add -A` away from entering history. Never committed; no history rewrite needed.
+  - The backend is on a `nano` instance and returned intermittent `504`s on migration commands. Both migrations applied cleanly on retry; state was re-queried after each 504 rather than blindly re-running.
 
 ---
 

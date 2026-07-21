@@ -221,16 +221,21 @@ URL saved to profiles table
 | portfolio_url       | text        |                                              |
 | work_authorization  | text        | citizen / permanent_resident / visa_required |
 | resume_pdf_url      | text        | InsForge Storage URL of current resume       |
+| resume_pdf_key      | text        | Storage key — required for download/delete   |
 | is_complete         | boolean     | True when all required fields filled         |
 | created_at          | timestamptz |                                              |
-| updated_at          | timestamptz |                                              |
+| updated_at          | timestamptz | Maintained by trigger                        |
+
+`id` references `auth.users(id)` directly. Completion percentage and missing-field
+tags are **derived in app code**, not stored — `is_complete` is the only persisted
+completion state.
 
 ### `agent_runs`
 
 | Column             | Type        | Notes                        |
 | ------------------ | ----------- | ---------------------------- |
 | id                 | uuid        |                              |
-| user_id            | uuid        | References profiles          |
+| user_id            | uuid        | References auth.users(id)    |
 | status             | text        | running / completed / failed |
 | job_title_searched | text        |                              |
 | location_searched  | text        |                              |
@@ -244,7 +249,7 @@ URL saved to profiles table
 | ------------------ | ----------- | ---------------------------------------------- |
 | id                 | uuid        |                                                |
 | run_id             | uuid        | References agent_runs — null if from URL input |
-| user_id            | uuid        | References profiles                            |
+| user_id            | uuid        | References auth.users(id)                      |
 | source             | text        | search / url                                   |
 | source_url         | text        | Original job listing URL                       |
 | external_apply_url | text        | Direct company apply URL                       |
@@ -272,7 +277,7 @@ URL saved to profiles table
 | ---------- | ----------- | -------------------------------- |
 | id         | uuid        |                                  |
 | run_id     | uuid        | References agent_runs            |
-| user_id    | uuid        | References profiles              |
+| user_id    | uuid        | References auth.users(id)        |
 | message    | text        | Human readable log entry         |
 | level      | text        | info / success / warning / error |
 | job_id     | uuid        | Optional — related job           |
@@ -282,11 +287,18 @@ URL saved to profiles table
 
 ## InsForge Storage
 
-| Bucket  | Path                         | Contents                  |
-| ------- | ---------------------------- | ------------------------- |
-| resumes | resumes/{user_id}/resume.pdf | Current active resume PDF |
+| Bucket  | Object key             | Contents                  |
+| ------- | ---------------------- | ------------------------- |
+| resumes | {user_id}/resume.pdf   | Current active resume PDF |
 
-Access: authenticated users only, own files only.
+Bucket is private. Access is enforced by **path-scoped RLS on `storage.objects`** —
+the first path segment of the key must equal the caller's JWT `sub`, so users can
+neither read nor write outside their own folder. The private flag alone would only
+mean "any signed-in user"; the policies are what make it "own files only".
+
+Uploads do **not** overwrite — storage auto-renames on key collision. Replacing a
+resume requires an explicit `remove()` first, and the returned `key` must be
+persisted to `profiles.resume_pdf_key`. See `context/library-docs.md`.
 
 ---
 

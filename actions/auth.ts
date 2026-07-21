@@ -2,7 +2,7 @@
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { createAuthActions } from "@insforge/sdk/ssr";
+import { createAuthActions, createServerClient } from "@insforge/sdk/ssr";
 import { getPostHogClient } from "@/lib/posthog-server";
 
 type OAuthProvider = "google" | "github";
@@ -51,4 +51,30 @@ export async function initiateOAuth(provider: OAuthProvider) {
   await posthog.flush();
 
   redirect(data.url);
+}
+
+// redirect() throws internally — see comment on initiateOAuth above.
+export async function signOutUser() {
+  const cookieStore = await cookies();
+  const auth = createAuthActions({ cookies: cookieStore });
+  const insforge = createServerClient({ cookies: cookieStore });
+  const { data } = await insforge.auth.getCurrentUser();
+
+  const { error } = await auth.signOut();
+  const posthog = getPostHogClient();
+
+  if (error) {
+    console.error("[actions/auth]", error);
+    posthog.captureException(error, data.user?.id ?? "anonymous");
+    await posthog.flush();
+    redirect("/login?error=sign_out_failed");
+  }
+
+  posthog.capture({
+    distinctId: data.user?.id ?? "anonymous",
+    event: "user_signed_out",
+  });
+  await posthog.flush();
+
+  redirect("/login");
 }

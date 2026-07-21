@@ -222,14 +222,31 @@ const insforge = await createInsforgeServer();
 
 All PostHog events must use these exact event names. Never invent new event names without adding them here first.
 
-| Event                | When                                       | Key Properties             |
-| -------------------- | ------------------------------------------ | -------------------------- |
+### Implemented — Phase 1 (Foundation / Auth)
+
+| Event                 | When                                          | Key Properties                |
+| ---------------------- | ---------------------------------------------- | ------------------------------ |
+| `cta_clicked`          | Homepage Get Started / Find Your First Match  | button_label                   |
+| `navbar_cta_clicked`   | Navbar "Start for free" clicked                | —                               |
+| `sign_in_page_viewed`  | Login page rendered (unauthenticated)          | —                               |
+| `oauth_initiated`      | OAuth flow started with provider               | provider                        |
+| `oauth_init_failed`    | InsForge failed to start the OAuth flow        | provider                        |
+| `sign_in_failed`       | OAuth callback/exchange failed                 | reason, oauth_error (if any)   |
+| `user_signed_in`       | OAuth code exchange succeeded                  | —                               |
+| `user_signed_out`      | Sign out completed successfully                | —                               |
+
+### Planned — later phases (not yet implemented)
+
+| Event                | When                                        | Key Properties             |
+| --------------------- | ------------------------------------------ | -------------------------- |
 | `job_search_started` | Find Jobs button clicked                   | userId, jobTitle, location |
 | `job_found`          | Each job discovered and saved              | userId, source, matchScore |
 | `profile_completed`  | User saves complete profile for first time | userId                     |
 | `company_researched` | Company research dossier generated         | userId, jobId, company     |
 
-These four events are the only events in this project. Do not add more without updating this list first.
+These twelve events are the only events in this project. Do not add more without updating this list first.
+
+Pre-auth events (`oauth_initiated`, `oauth_init_failed`, `sign_in_failed`, `sign_in_page_viewed`) fire with `distinctId: "anonymous"` since no user identity exists yet. `user_signed_in` and `user_signed_out` use the InsForge user id when available, falling back to `"anonymous"`.
 
 `job_found` powers the Jobs Found Over Time and Match Score Distribution dashboard charts.
 `company_researched` powers the Company Research Activity dashboard chart.

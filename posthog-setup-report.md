@@ -10,6 +10,8 @@ The wizard has completed a deep integration of PostHog analytics into JobPilot. 
 | `user_signed_in` | User successfully completed OAuth authentication; fires with their InsForge user ID as the PostHog distinct ID. | `app/api/auth/callback/route.ts` |
 | `oauth_init_failed` | The OAuth handshake could not be started (InsForge SDK returned an error or an incomplete response); property `provider` is `google` or `github`. | `actions/auth.ts` |
 | `sign_in_failed` | A sign-in attempt failed after redirecting back from the provider; property `reason` is `oauth_failed`, `missing_verifier`, or `exchange_failed`. | `app/api/auth/callback/route.ts` |
+| `sign_in_page_viewed` | Server-rendered view of the sign-in page; the top of the authentication conversion funnel. | `app/(auth)/login/page.tsx` |
+| `user_signed_out` | User signed out from the dashboard placeholder; fires with their InsForge user ID as the distinct ID. | `actions/auth.ts` |
 
 ## Next steps
 

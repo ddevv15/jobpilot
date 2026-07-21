@@ -139,3 +139,24 @@ Last updated: 2026-07-09
 
 **Pattern notes:**
 Reuses `bg-hero-gradient` (the same mesh-gradient utility as the homepage Hero/CTA panels) for the left marketing panel instead of inventing a new gradient. Each OAuth button is its own `<form action={initiateOAuth.bind(null, provider)}>` wrapping a `<button type="submit">` — keeps the page a Server Component (no `"use client"` needed) since the Server Action is bound per-provider rather than handled with an `onClick`. Google and GitHub are represented with generic lucide icons (`Globe`, `GitFork`) in accent purple rather than brand-colored logo marks — `lucide-react@1.23.0` doesn't ship brand/logo icons, and this reads cleaner than mixed-brand-color icons next to the purple accent system anyway. Below the `lg` breakpoint the left panel is dropped entirely and the card collapses to just the sign-in column.
+
+### Dashboard placeholder (temporary — pre–Phase 5)
+
+File: `app/dashboard/page.tsx`, `components/auth/SignOutButton.tsx`
+Last updated: 2026-07-16
+
+| Property      | Class                                                                          |
+| ------------- | ------------------------------------------------------------------------------- |
+| Page          | `flex min-h-screen items-center justify-center bg-background p-6`             |
+| Card          | `w-full max-w-md rounded-2xl border border-border bg-surface p-6 text-center` (Cards token — corrected from `p-8`) |
+| Shadow        | `shadow-[0px_1px_3px_rgba(0,0,0,0.1),0px_1px_2px_-1px_rgba(0,0,0,0.1)]` (matches Cards token) |
+| Success icon  | `mx-auto h-10 w-10 text-success` (lucide `CheckCircle2`)                       |
+| Heading       | `mt-4 text-2xl font-bold text-text-primary`                                    |
+| Email         | `mt-2 text-sm text-text-secondary`                                             |
+| Caption       | `mt-6 text-xs text-text-muted`                                                |
+| Sign-out button | `w-full rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium text-text-primary hover:bg-surface-secondary` (Secondary Button token) |
+
+**Pattern notes:**
+Not the real Dashboard — that's Phase 5 (`14 Dashboard Page — Full UI` in `build-plan.md`) with stat cards, recent activity, and charts. This is a minimal stand-in so the post-login redirect (`/dashboard`) doesn't 404 while Phases 2–4 are still unbuilt; it only proves the sign-in round trip and adds a sign-out path. Replace the body entirely when Phase 5 starts — don't extend this placeholder.
+
+Sign-out button is its own `"use client"` component (`components/auth/SignOutButton.tsx`) rather than inline markup in the page — it needs to call `posthog.reset()` (posthog-js, browser-only) on click before the surrounding `<form action={signOutUser}>` submits, so the page itself can stay a Server Component.

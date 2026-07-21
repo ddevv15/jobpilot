@@ -1,0 +1,18 @@
+- generic [active] [ref=e1]:
+  - main [ref=e2]:
+    - generic [ref=e3]:
+      - generic [ref=e4]:
+        - generic [ref=e5]: OAuth secured by InsForge
+        - heading "Sign in and let the agent prep your next application." [level=1] [ref=e9]
+        - paragraph [ref=e10]: Connect with Google or GitHub to start building your profile, matching jobs, and creating tailored application materials.
+        - paragraph [ref=e11]: New users are routed to profile setup after sign-in.
+      - generic [ref=e13]:
+        - paragraph [ref=e14]: Welcome to
+        - heading "JobPilot" [level=2] [ref=e15]
+        - paragraph [ref=e16]: Choose your preferred provider to continue.
+        - paragraph [ref=e17]: Could not sign out. Please try again.
+        - generic [ref=e18]:
+          - button "Continue with Google" [ref=e20]
+          - button "Continue with GitHub" [ref=e25]
+  - button "Open Next.js Dev Tools" [ref=e36] [cursor=pointer]
+  - alert [ref=e40]

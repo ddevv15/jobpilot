@@ -9,6 +9,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   oauth_failed: "Sign in was cancelled or failed. Please try again.",
   missing_verifier: "Your sign in session expired. Please try again.",
   exchange_failed: "Could not complete sign in. Please try again.",
+  sign_out_failed: "Could not sign out. Please try again.",
 };
 
 type Props = {

@@ -1,8 +1,8 @@
 import { redirect } from "next/navigation";
-import { ShieldCheck, Globe, GitFork } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
 import { createInsforgeServer } from "@/lib/insforge-server";
-import { initiateOAuth } from "@/actions/auth";
 import { getPostHogClient } from "@/lib/posthog-server";
+import { AuthPanel } from "@/components/auth/AuthPanel";
 
 const ERROR_MESSAGES: Record<string, string> = {
   oauth_init_failed: "Could not start sign in. Please try again.",
@@ -37,7 +37,7 @@ export default async function LoginPage({ searchParams }: Props) {
         <div className="relative hidden flex-col justify-center bg-hero-gradient px-16 py-16 lg:flex">
           <span className="mb-8 inline-flex w-fit items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text-secondary">
             <ShieldCheck className="h-3.5 w-3.5 text-accent" />
-            OAuth secured by InsForge
+            Secured by InsForge
           </span>
 
           <h1 className="max-w-lg text-4xl font-bold text-text-primary md:text-5xl">
@@ -45,8 +45,9 @@ export default async function LoginPage({ searchParams }: Props) {
           </h1>
 
           <p className="mt-6 max-w-md text-base text-text-secondary">
-            Connect with Google or GitHub to start building your profile,
-            matching jobs, and creating tailored application materials.
+            Use your email or connect with Google or GitHub to start building
+            your profile, matching jobs, and creating tailored application
+            materials.
           </p>
 
           <p className="mt-10 text-xs text-text-muted">
@@ -55,42 +56,7 @@ export default async function LoginPage({ searchParams }: Props) {
         </div>
 
         <div className="flex items-center justify-center px-6 py-16">
-          <div className="w-full max-w-sm">
-            <p className="text-sm text-text-secondary">Welcome to</p>
-            <h2 className="mt-1 text-3xl font-bold text-text-primary">
-              JobPilot
-            </h2>
-            <p className="mt-3 text-sm text-text-secondary">
-              Choose your preferred provider to continue.
-            </p>
-
-            {errorMessage ? (
-              <p className="mt-6 rounded-md bg-accent-muted px-3 py-2 text-xs text-text-secondary">
-                {errorMessage}
-              </p>
-            ) : null}
-
-            <div className="mt-8 flex flex-col gap-3">
-              <form action={initiateOAuth.bind(null, "google")}>
-                <button
-                  type="submit"
-                  className="flex w-full items-center justify-center gap-2 rounded-md border border-border bg-surface px-4 py-3 text-sm font-medium text-text-primary transition-colors hover:bg-surface-secondary"
-                >
-                  <Globe className="h-4 w-4 text-accent" />
-                  Continue with Google
-                </button>
-              </form>
-              <form action={initiateOAuth.bind(null, "github")}>
-                <button
-                  type="submit"
-                  className="flex w-full items-center justify-center gap-2 rounded-md border border-border bg-surface px-4 py-3 text-sm font-medium text-text-primary transition-colors hover:bg-surface-secondary"
-                >
-                  <GitFork className="h-4 w-4 text-accent" />
-                  Continue with GitHub
-                </button>
-              </form>
-            </div>
-          </div>
+          <AuthPanel initialError={errorMessage} />
         </div>
       </div>
     </main>

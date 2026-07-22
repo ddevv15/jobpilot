@@ -56,3 +56,6 @@ next-env.d.ts
 .trae
 .windsurf
 .env.local
+
+# MCP server config — contains InsForge admin API key
+.mcp.json

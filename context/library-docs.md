@@ -157,28 +157,51 @@ const { error } = await insforge.database
 
 ### Storage
 
+`upload()` takes exactly two arguments — `(path, file)`. There is **no options object**: no `contentType`, and critically **no `upsert`**. Corrected against `npx @insforge/cli docs storage typescript` during Feature 04.
+
 ```typescript
-// Upload file
+// Upload file — two arguments only
 const { data, error } = await insforge.storage
   .from("resumes")
-  .upload(`${userId}/resume.pdf`, fileBuffer, {
-    contentType: "application/pdf",
-    upsert: true, // overwrites existing file
-  });
+  .upload(`${userId}/resume.pdf`, file);
 
-// data.url is the public/display URL — no separate getPublicUrl() call exists
+// Always persist BOTH — the key may differ from the path you requested
 const url = data.url;
+const key = data.key;
 ```
+
+**⚠️ Uploads never overwrite — the backend auto-renames on key collision.**
+Uploading to an existing key writes a *new* object under a different key and returns that key. Since "multiple saved resume versions" is out of scope (one active resume per user), replacing a resume must be an explicit two-step:
+
+```typescript
+// 1. Remove the previous object using the key stored in profiles.resume_pdf_key
+if (profile.resume_pdf_key) {
+  await insforge.storage.from("resumes").remove(profile.resume_pdf_key);
+}
+// 2. Upload the replacement, then persist the returned url AND key
+const { data } = await insforge.storage
+  .from("resumes")
+  .upload(`${userId}/resume.pdf`, file);
+```
+
+**Available methods:** `upload(path, file)`, `uploadAuto(file)` (auto-generated key), `download(path)`, `remove(path)`.
 
 **Storage paths:**
 
-- Base resume: `resumes/{user_id}/resume.pdf`
+- Bucket: `resumes` (private). Object key: `{user_id}/resume.pdf`
+
+**Access control — path-scoped RLS on `storage.objects`:**
+
+Isolation is enforced by Postgres RLS, not by the bucket's private flag alone. Ownership is the **first path segment of the key**, so the `{user_id}/` prefix is load-bearing — writing to any other prefix is rejected by the policy. Policies are scoped to `bucket = 'resumes'`; a new bucket gets no access until its own policies are written. See `migrations/20260721111346_storage-resumes-rls.sql`.
 
 **Rules:**
 
-- Always use `upsert: true` for base resume uploads — overwrites existing file
-- Always save both `data.url` (display) AND `data.key` (required for download/delete) back to the DB after upload — there is no `getPublicUrl()` method in the current SDK
-- Never write files to disk — always upload buffer directly to storage
+- Never pass an options object to `upload()` — it does not exist
+- Never assume the stored key equals `{user_id}/resume.pdf` — always read it back from the upload response
+- Always save both `data.url` (display) AND `data.key` (required for download/delete) to `profiles.resume_pdf_url` / `profiles.resume_pdf_key` — there is no `getPublicUrl()` method
+- Always `remove()` the old object before uploading a replacement, or orphaned auto-renamed files accumulate
+- Always upload under the `{user_id}/` prefix — the RLS policy denies anything else
+- Never write files to disk — always upload the buffer directly to storage
 - In Client Components, use `createBrowserClient()` from `@insforge/sdk/ssr` so uploads carry the signed-in user's access token for Storage RLS
 
 ---

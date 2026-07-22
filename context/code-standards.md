@@ -224,16 +224,22 @@ All PostHog events must use these exact event names. Never invent new event name
 
 ### Implemented — Phase 1 (Foundation / Auth)
 
-| Event                 | When                                          | Key Properties                |
-| ---------------------- | ---------------------------------------------- | ------------------------------ |
-| `cta_clicked`          | Homepage Get Started / Find Your First Match  | button_label                   |
-| `navbar_cta_clicked`   | Navbar "Start for free" clicked                | —                               |
-| `sign_in_page_viewed`  | Login page rendered (unauthenticated)          | —                               |
-| `oauth_initiated`      | OAuth flow started with provider               | provider                        |
-| `oauth_init_failed`    | InsForge failed to start the OAuth flow        | provider                        |
-| `sign_in_failed`       | OAuth callback/exchange failed                 | reason, oauth_error (if any)   |
-| `user_signed_in`       | OAuth code exchange succeeded                  | —                               |
-| `user_signed_out`      | Sign out completed successfully                | —                               |
+| Event                 | When                                          | Key Properties                          |
+| ---------------------- | ---------------------------------------------- | ---------------------------------------- |
+| `cta_clicked`          | Homepage Get Started / Find Your First Match  | button_label                             |
+| `navbar_cta_clicked`   | Navbar "Start for free" clicked                | —                                         |
+| `sign_in_page_viewed`  | Login page rendered (unauthenticated)          | —                                         |
+| `oauth_initiated`      | OAuth flow started with provider               | provider                                  |
+| `oauth_init_failed`    | InsForge failed to start the OAuth flow        | provider                                  |
+| `sign_up_started`      | Email/password sign-up form submitted          | —                                         |
+| `sign_up_failed`       | Sign-up rejected by backend                    | reason (`email_taken` \| `weak_password` \| `signup_failed`) |
+| `email_verification_sent` | Verification code emailed (sign-up or resend) | context (`sign_up` \| `resend`)         |
+| `email_verified`       | 6-digit code verified; account activated       | —                                         |
+| `sign_in_failed`       | Any sign-in attempt failed                     | method (`oauth` \| `password`), reason, oauth_error (if any) |
+| `user_signed_in`       | Sign-in succeeded (OAuth exchange or password) | method (`oauth` \| `password`)           |
+| `password_reset_requested` | Forgot-password form submitted             | —                                         |
+| `password_reset_completed` | New password set via reset code            | —                                         |
+| `user_signed_out`      | Sign out completed successfully                | —                                         |
 
 ### Planned — later phases (not yet implemented)
 
@@ -244,9 +250,11 @@ All PostHog events must use these exact event names. Never invent new event name
 | `profile_completed`  | User saves complete profile for first time | userId                     |
 | `company_researched` | Company research dossier generated         | userId, jobId, company     |
 
-These twelve events are the only events in this project. Do not add more without updating this list first.
+These events are the only events in this project. Do not add more without updating this list first.
 
-Pre-auth events (`oauth_initiated`, `oauth_init_failed`, `sign_in_failed`, `sign_in_page_viewed`) fire with `distinctId: "anonymous"` since no user identity exists yet. `user_signed_in` and `user_signed_out` use the InsForge user id when available, falling back to `"anonymous"`.
+**Auth-method-agnostic events.** `sign_in_failed`, `user_signed_in`, and `user_signed_out` cover both OAuth and email/password. `user_signed_in` and `sign_in_failed` carry a `method` property (`oauth` \| `password`) so the sign-in funnel stays unified rather than split across parallel events. `sign_in_failed`'s `reason` extends per method: OAuth uses `oauth_failed` \| `missing_verifier` \| `exchange_failed`; password uses `invalid_credentials` \| `email_not_verified`.
+
+Pre-identity events (`oauth_initiated`, `oauth_init_failed`, `sign_in_page_viewed`, `sign_up_started`, `sign_up_failed`, `email_verification_sent`, `password_reset_requested`, and any pre-auth `sign_in_failed`) fire with `distinctId: "anonymous"` since no user identity exists yet. `email_verified`, `user_signed_in`, `password_reset_completed`, and `user_signed_out` use the InsForge user id when available, falling back to `"anonymous"`.
 
 `job_found` powers the Jobs Found Over Time and Match Score Distribution dashboard charts.
 `company_researched` powers the Company Research Activity dashboard chart.

@@ -6,9 +6,9 @@ Update this file after every completed feature. Any AI agent reading this should
 
 ## Current Status
 
-**Phase:** Phase 1 — Foundation complete
-**Last completed:** 04 Database Schema
-**Next:** 05 Profile Page — Full UI (Phase 2)
+**Phase:** Phase 2 — Profile Page (in progress)
+**Last completed:** 06 Profile Save Logic
+**Next:** 07 AI Profile Extraction from Resume (Phase 2)
 
 ---
 
@@ -23,8 +23,8 @@ Update this file after every completed feature. Any AI agent reading this should
 
 ### Phase 2 — Profile Page
 
-- [ ] 05 Profile Page — Full UI
-- [ ] 06 Profile Save Logic
+- [x] 05 Profile Page — Full UI
+- [x] 06 Profile Save Logic
 - [ ] 07 AI Profile Extraction from Resume
 - [ ] 08 Resume PDF Generation from Profile
 
@@ -101,9 +101,75 @@ Update this file after every completed feature. Any AI agent reading this should
   - **Verified on a throwaway schema-only branch (`emailpw-verify`), production untouched** (same technique as Feature 04; re-confirmed production still enforces verification + 2 users afterward). 8/8 SDK-contract checks passed: strong pw accepted + requires verification, weak pw rejected (400), verify-wrong-code errors (400), unverified signin blocked (403), wrong-password errors (401), reset-request responds, reset-exchange-wrong-code errors (400), and — after admin-marking the user verified — signin returns a real session. `tsc --noEmit` and `next build` both clean.
   - **Not runtime-tested (bounded, honest):** the two *emailed-code happy paths* — verify-success and reset-completion — can't be automated here. The OTP is stored hashed (`auth.email_otps.otp_hash`) and there's no inbox in this environment (same limitation class as the missing OAuth credentials). Their SDK calls are identical in shape to the signin path that *was* proven end-to-end, and the React wiring is covered by typecheck + build. First real email delivery to a human inbox is the remaining confirmation.
 
+- **05 Profile Page — Full UI**: new `/profile` route (`app/profile/page.tsx`, Server Component, same auth-guard pattern as the dashboard placeholder) rendering three cards in a `max-w-2xl` column — `CompletionIndicator`, `ResumeUpload`, `ProfileForm` (all new in `components/profile/`). Built to pixel-match `context/designs/profile.png`. Verified: `tsc --noEmit` exit 0, `eslint` exit 0, and a full-page Playwright screenshot against the design (via a throwaway unguarded `/ui-check` route, since `/profile` redirects to `/login` without a session — same OAuth-credential limitation as prior phases; route deleted after).
+  - **Interactive local state, zero persistence** (developer's call). The form is a single `useState` seeded from an in-file `MOCK_PROFILE`; editing, skill/industry pill add-remove, "Add role" (cap 3), and the "Currently working here" toggle all work client-side. `Save Profile` and the resume `Generate`/upload actions are inert — Feature 06/07/08 own them. This satisfies code-standards' "every feature must be testable" without touching the DB.
+  - **Followed the design over three written ui-rules** (developer's call), all still tokens-only (no hex, no raw palette classes):
+    - Active nav = **purple + underline** (`border-b-2 border-accent`), contradicting ui-rules.md's "No underline — active state is color change only". ui-rules.md itself defers to design assets for visual decisions, and `profile.png` underlines the active item.
+    - The "needs attention" banner uses a **faint red-tinted surface** (`bg-error/5`, `border-error/15`), contradicting "cards are always white". Confined to this one warning banner; achieved with opacity modifiers on `--color-error`, not a new colour.
+    - **Cover Letter Tone dropdown omitted** despite build-plan 05 listing it under Job Preferences — it isn't in the design, and cover-letter generation is out of scope (project-overview.md:186). `profiles.cover_letter_tone` stays in the schema (nullable, harmless).
+  - **Shared `Navbar` gained a `variant` prop** rather than forking an app navbar. Links extracted to a new `"use client"` `NavLinks` (`usePathname()` for active state) so `Navbar` stays a Server Component; `variant="app"` hides the marketing `NavbarCTA`. Homepage keeps the default `marketing` variant and is untouched — pathname `/` matches no nav item, so there's no visual regression (re-verified: on `/profile` the Profile link resolves to the active class; on `/` nothing is active).
+  - **Email field prefilled from the real session** (read-only), falling back to the design's sample — the one genuinely user-specific value; every other field is mock. The completion banner (70% / PHONE·LOCATION·EDUCATION) is **static mock** this phase; deriving it from actual profile completeness is Feature 06.
+  - **shadcn/ui is listed in architecture.md but is not actually installed** (no `components.json`, no Radix/`clsx`/`tailwind-merge` in `package.json`). Kept the existing hand-rolled token pattern (as AuthPanel/Navbar do) rather than introducing shadcn — installing it now would violate code-standards' "never install a package without a clear reason". Worth reconciling architecture.md later.
+
+- **06 Profile Save Logic**: `/profile` now reads and writes real data. `lib/profile.ts` (form↔row mapping + the completion model), `actions/profile.ts` (`saveProfile`, `saveResume`), `ProfileForm` wired to the action, `app/profile/page.tsx` loading the row server-side, and `ResumeUpload` uploading to Storage for real.
+  - **A prior session built most of this without recording it.** `lib/profile.ts`, `actions/profile.ts` and the `ProfileForm` wiring already existed as untracked files, but `page.tsx` was never updated to match — the tree did not compile (`TS2741: Property 'initialValues' is missing`). The existing work was kept, not rebuilt. Lesson: run `/remember save` before ending a session, or the next one starts from a stale picture.
+  - **Resume uploads from the browser client, not a Server Action.** `library-docs.md:205` prescribes `createBrowserClient()` so the upload carries the user's access token for Storage RLS, and Next.js Server Actions default to a **1MB** body limit while the dropzone promises 5MB. The client uploads, then `saveResume(url, key)` persists the pointer server-side.
+  - **Upload first, remove the superseded object second** — deliberately inverting `library-docs.md:202`'s literal "remove before uploading" ordering. That rule exists to stop orphaned auto-renamed files accumulating, which this ordering also achieves, while never leaving the user resumeless if the upload fails. A failed `remove()` is logged and does **not** fail the save — an orphan is recoverable, a lost pointer is not.
+  - **`saveResume` re-checks the key prefix.** The client supplies `key`, so the action rejects anything not starting `${user.id}/` — the same predicate the `storage.objects` RLS policy enforces, applied again rather than trusted.
+  - **Both writes are partial upserts, which is what makes them safe.** PostgREST's `upsert` only writes the columns present in the payload, so `saveProfile` (whose `ProfileWrite` has no resume columns) cannot clobber an uploaded resume, and `saveResume` cannot clobber the form. It also means a resume can be uploaded before the profile row exists — every column but `id` is nullable or defaulted. Note this needs **both** INSERT and UPDATE grants + policies, since upsert compiles to `INSERT … ON CONFLICT DO UPDATE`; Feature 04 granted both.
+  - **`.upsert()` is real despite being absent from `@insforge/sdk`'s `.d.ts`** — `Database` wraps `postgrest-js`, which supplies the method and its types. Grepping the SDK package alone is misleading.
+  - **Session email seeds the completion model** (`toCompletionInput`). `email` is 1 of the 10 required fields but is read-only and only reaches the row on first save, so a new user would otherwise see an `EMAIL` missing-pill beside an already-filled email input. Denominator stays 10, so the design's percentages are unchanged.
+  - **The completion banner is hidden at 100%**, decided at the page level so `CompletionIndicator` stays presentational. The design only ever specifies the attention state; telling a user with a complete profile that it "needs attention" would be wrong, and a success variant would invent styling the design never specified.
+  - **No new PostHog event.** `profile_completed` was already wired and is guarded to the false→true `is_complete` transition, so it fires once and never re-fires on later saves.
+  - **No link to the stored resume.** The `resumes` bucket is private with path-scoped RLS, so a plain `<a href>` to `resume_pdf_url` would not carry the access token. The card reports that a resume is on file instead; serving it needs `storage.download()` or a signed URL, which Features 07/08 will need anyway.
+  - Verified: `tsc --noEmit` exit 0, `eslint` exit 0, `next build` compiled successfully with `/profile` correctly dynamic (`ƒ`). **Runtime round-trip not yet exercised** — see the verification checklist in the Feature 06 plan; email/password auth now makes a real authenticated session obtainable for the first time.
+
+- **Post-`/review` fixes (Feature 06)**: review found 10 issues — 1 critical, 3 important, 6 minor. **9 fixed; the critical one is not code.**
+  - **Code — file input never reset (the only defect a user would have hit).** `<input type="file">` fires no `change` event when the same file is selected twice, so retrying after a rejection, or replacing a resume with an identically-named file, silently did nothing. Now cleared via `event.target.value = ""` after every selection. Applies to any future file input.
+  - **Code — numeric fields now reject bad input at the keystroke.** `TextField` gained `numeric` + `maxLength`; Years of Experience and Graduation Year filter to digits and set `inputMode="numeric"`. Previously `"abc"` parsed to `null` silently, so the field looked saved while the banner kept listing it missing. `parseGradYear` independently clamps to 1900–(current year + 10) — the form is not trusted as the only guard.
+  - **Code — fully-blank work-experience roles are dropped on save.** Clicking "Add role" and saving wrote an empty object into the JSONB array. Only *entirely* empty roles are filtered, so a partially-filled role never loses data.
+  - **Code — `ProfileForm`'s root is now a `<form>`** with a `type="submit"` button, so Enter saves. Safe only because every other button in the subtree is explicitly `type="button"` and `TagInput` preventDefaults Enter — **preserve both when adding controls.**
+  - **Docs — `library-docs.md` prescribed `posthog.shutdown()`, which would have broken analytics.** The server client is a process-wide singleton, so `shutdown()` would tear it down for every subsequent request in that process, silently. All 10 call sites already used `flush()`; the doc was wrong, not the code. Section rewritten with an explicit "never call shutdown()" rule and the real `getPostHogClient()` singleton.
+  - **Docs — `library-docs.md`'s @react-pdf section still showed the dead storage API** (`upload(path, buffer, { contentType, upsert: true })`) that the same file's Storage section had already corrected — it would have misled Feature 08 directly. Now shows the two-arg signature, the `Buffer` → `Blob` wrap that `upload()` requires, and persisting both `url` and `key`.
+  - **Docs — `build-plan.md` still specified `upsert: true`** in both 06 and 08. Corrected in place, preserving the intent (one active resume, replace not accumulate) while naming the real mechanism and pointing at `saveResume` as the reference implementation.
+  - **Docs — `code-standards.md`'s env table named a variable and a file that do not exist** (`NEXT_PUBLIC_POSTHOG_KEY` in `lib/posthog-client.ts`). Reality is `NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN` in `lib/posthog-server.ts` + `instrumentation-client.ts`. Anyone provisioning a fresh environment from that table would have got silently broken analytics. Also flagged which listed variables are contracts for unbuilt features rather than present in `.env.local`.
+  - **Docs — `architecture.md` reconciled with reality.** Its boundary table forbade DB calls in `components/` while its own client pattern sanctioned Storage there; added an explicit Storage carve-out so the working `ResumeUpload` isn't "fixed" later. Removed shadcn/ui from the stack, `components/ui/` from the tree, and the never-built `ResumePreview.tsx`; added the three field primitives. Recorded *why* shadcn is deliberately not used, so it doesn't get reinstated.
+  - **Not fixed — orphaned storage objects.** A failed `remove()` in `saveResume` is still logged and swallowed. That remains the deliberate trade (an orphan is recoverable, a lost pointer is not); no sweep exists.
+  - **Not fixed — the critical item: Feature 06 has still never executed.** `tsc`, `eslint` and `next build` all pass, but no row has been written to InsForge and no object to Storage. Unproven: `onConflict: "id"` round-tripping, browser upload clearing Storage RLS, second-upload removal, and `profile_completed` firing exactly once. This needs a real authenticated session — see the checklist in `memory.md`.
+
 ---
 
 ## Notes
 
 - Root layout now uses `next/font/google` Inter (`--font-sans`) per ui-rules.md, replacing the default Geist fonts from create-next-app.
 - `components/layout/` and `components/homepage/` created per architecture.md. Added `CTAButtons.tsx`, `Testimonial.tsx`, and `CTASection.tsx` to `components/homepage/` — not explicitly listed in architecture.md's folder sketch, but consistent with its naming conventions and needed to cover every section in the design.
+
+---
+
+## Open Items Carried Into Phase 2+
+
+Things known to be unresolved. Check this before starting any feature — several are prerequisites, not preferences.
+
+**Blocking / do first**
+
+- **Feature 06's runtime round-trip has never been executed.** Static checks all pass, but nothing has been written to InsForge or Storage. Unproven: `onConflict: "id"` round-tripping, browser upload clearing Storage RLS, second-upload removal, `profile_completed` firing exactly once. Needs a real authenticated session (email/password auth now makes one obtainable). Checklist in `memory.md`.
+- **Nothing can read the private resume back.** `resumes` is private with path-scoped RLS, so `resume_pdf_url` is not directly fetchable — no `storage.download()` or signed-URL helper exists yet. **Feature 07 cannot parse a resume until this is built.**
+
+**Prerequisites for unbuilt features**
+
+- **Dependencies not installed:** `openai` + `pdf-parse` (07), `@react-pdf/renderer` (08), `zod` (10/13), `@browserbasehq/sdk` + `@browserbasehq/stagehand` (13).
+- **`recharts` (Feature 17) is missing from code-standards' approved-dependency list.** That list is a hard gate — add it there *before* installing, or 17 stalls on the project's own rules.
+- **Env vars not set:** `OPENAI_API_KEY` (07), `ADZUNA_APP_ID` / `ADZUNA_APP_KEY` (10), `BROWSERBASE_API_KEY` / `BROWSERBASE_PROJECT_ID` (13).
+- **`lib/utils.ts` with `MATCH_THRESHOLD = 70`** is mandated by code-standards but does not exist. Needed from Feature 10.
+- **`/find-jobs` is already protected by `proxy.ts` but the route does not exist** — currently an auth-guarded 404 until Feature 09.
+- **`app/dashboard/page.tsx` is a placeholder.** Replace its body when Phase 5 starts; do not extend it.
+
+**Design / consistency debt**
+
+- **3-level nested border-radius in Work Experience** (card `rounded-2xl` → role box `rounded-xl` → input `rounded-md`) breaches ui-rules' "max 2 levels" but is design-mandated. Kept the design; flattening the role box is a ~1-line change. **Awaiting a decision.**
+- **Label-casing mismatch blocks form-field unification.** `TextField`'s input token exactly matches `AuthPanel`'s inline input, but profile uses an uppercase caption and AuthPanel does not. Reconcile the casing before trying to share one component across auth + profile.
+
+**Deployment**
+
+- Production `NEXT_PUBLIC_APP_URL` and its OAuth callback added to InsForge's `allowedRedirectUrls` — neither exists yet.
+- The backend is a `nano` instance and intermittently 504s on slow DB/migration operations. Retry works; re-query state rather than blindly re-running.

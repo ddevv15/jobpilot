@@ -1,49 +1,84 @@
-# Memory — 04 Database Schema (Phase 1 complete)
+# Memory — Feature 06 (Profile Save Logic) built + reviewed + fixed
 
-Last updated: 2026-07-21 17:59
+Last updated: 2026-07-27
 
 ## What was built
 
-- **04 Database Schema — complete and verified.** Backend was a clean slate before this session (zero tables, zero buckets, no `migrations/` directory).
-- **`migrations/20260721110500_create-schema.sql`** — `profiles`, `agent_runs`, `jobs`, `agent_logs`. RLS enabled on all four, 11 owner-only policies, narrowed grants, 12 indexes, `updated_at` trigger on `profiles`.
-- **`migrations/20260721111346_storage-resumes-rls.sql`** — path-scoped RLS on `storage.objects` for the `resumes` bucket.
-- **Private `resumes` storage bucket** created via CLI.
-- **`types/index.ts`** — `Profile`, `Job`, `AgentRun`, `AgentLog`, `CompanyResearch`, plus the union types for every CHECK-constrained column. `tsc --noEmit` exits 0.
-- **Docs corrected:** `context/architecture.md` (FK targets, `resume_pdf_key`, storage section), `context/library-docs.md` (Storage section rewritten), `context/progress-tracker.md` (04 ticked, all decisions + drifts recorded), `.gitignore` (`.mcp.json` added).
+**Feature 06 — Profile Save Logic**, Phase 2, then a full `/review` pass and 9 fixes. `/profile` now reads and writes real InsForge data. Not committed; working tree holds Features 05 + 06 stacked together.
+
+Roughly 70% of 06 already existed as untracked files from a session that ended without `/remember save` — kept, not rebuilt, but it had left the tree not compiling.
+
+**Feature 06 build:**
+
+- `lib/profile.ts` — added `toCompletionInput(row, sessionEmail)`. Mapping (`rowToFormValues`, `formValuesToRow`), `ProfileWrite`, `CompletionInput`, the 10-field completion model and `getProfileCompletion` all pre-existed.
+- `actions/profile.ts` — added `saveResume(url, key)`. `saveProfile` pre-existed.
+- `app/profile/page.tsx` — rewritten. Reads the row server-side, derives completion, renders the banner only when incomplete, passes `initialValues` / `userId` / `resumeUrl` down. Extracts `userId`+`email` as scalars rather than coupling to `UserSchema`'s shape. `redirect()` outside the try block.
+- `components/profile/ResumeUpload.tsx` — rewritten. Real browser-client upload, `Status` discriminated union, PDF+5MB validation before any network call.
+
+**Post-review fixes (9 of 10 findings):**
+
+- `ResumeUpload` — file input cleared (`event.target.value = ""`) after every selection.
+- `TextField` — new `numeric` + `maxLength` props; digits-only filtering + `inputMode="numeric"`. Applied to Years of Experience (2) and Graduation Year (4).
+- `lib/profile.ts` — `parseGradYear` clamped to 1900–(current year + 10); fully-blank work-experience roles filtered out in `formValuesToRow`.
+- `ProfileForm` — root is now a `<form>` with a `type="submit"` button, so Enter saves.
+- Docs corrected: `library-docs.md` (PostHog `shutdown()`→`flush()`, and the @react-pdf section's dead storage API), `build-plan.md` (`upsert: true` in both 06 and 08), `code-standards.md` (env table), `architecture.md` (Storage carve-out, shadcn/`ResumePreview` removed).
+- `progress-tracker.md` + `ui-registry.md` updated, including a new **Open Items Carried Into Phase 2+** section in the tracker.
 
 ## Decisions made
 
-- **Ownership FKs point at `auth.users(id)`, not `profiles(id)`** as `architecture.md` originally said. Every policy is a direct `user_id = (SELECT auth.uid())` check. The real reason: FKs pointing at `profiles` meant no job row could be inserted before a profile row existed — an ordering dependency the build plan never states.
-- **`is_complete` is the only persisted completion state.** Completion percentage and missing-field tags are derived in app code in Phase 2, despite `build-plan.md:113` saying "calculated and saved" — storing them means recomputing on every write and going stale when required-field rules change.
-- **No "tailored fields" on `jobs`** despite `build-plan.md:73` asking for them. Resume tailoring and cover letters are explicitly out of scope in `project-overview.md`.
-- **No `CHECK` on `jobs.job_type`** — deliberate exception. It maps straight from Adzuna's `contract_type`, which emits values (`permanent`, `part_time`) outside architecture.md's set. A constraint would reject live Adzuna rows in Feature 10.
-- **Minimal grant surface:** `REVOKE ALL` from `anon`/`authenticated` first (InsForge pre-grants broad DML), then grant back only what features perform. No `DELETE` on any table. `agent_logs` is append-only.
-- **Feature 04 ships the TypeScript types**, not just DB objects — the types are the schema's contract and Phase 2 needs them immediately.
+- **Resume uploads from the browser client, not a Server Action.** `library-docs.md:205` prescribes `createBrowserClient()` for Storage RLS, and Server Actions default to a **1MB** body limit while the dropzone promises 5MB.
+- **Upload first, remove the superseded object second** — inverting library-docs' literal ordering. Still prevents orphan accumulation, but never leaves the user resumeless if the upload fails. A failed `remove()` is logged and does **not** fail the save.
+- **`saveResume` re-checks the `${user.id}/` key prefix** — the client supplies the key, so the storage-RLS ownership predicate is applied again rather than trusted.
+- **Session email seeds the completion model** — `email` is required but read-only and only reaches the row on first save. Denominator stays 10.
+- **Completion banner hidden at 100%**, decided at page level so `CompletionIndicator` stays presentational. Do not push an `isComplete` prop into it.
+- **Numeric fields reject bad input at the keystroke** rather than reporting it afterwards — the old failure was silent (`"abc"` → `null`, field looks saved, banner still says missing). Server-side bounds are independent of the UI.
+- **No new PostHog event.** `profile_completed` was already wired and transition-guarded.
+- **shadcn/ui is deliberately not used** — recorded in `architecture.md` with reasoning so it doesn't get reinstated.
 
 ## Problems solved
 
-- **`library-docs.md` documented a Storage API that does not exist.** Real signature is `upload(path, file)` — no options object, no `contentType`, and **no `upsert`**. The documented `upsert: true` does not overwrite; **the backend auto-renames on key collision**. Consequences: `resume_pdf_key` had to be added to `profiles` (the key is NOT derivable from the user id), and Features 06/08 must `remove()` the old object before uploading or orphaned files accumulate. Same drift class as the 02 Auth discovery — do not trust `library-docs.md` for InsForge APIs without checking `npx @insforge/cli docs <feature> typescript`.
-- **`storage.objects` shipped with RLS DISABLED and zero policies** on this backend (v2.2.6), contradicting InsForge's own docs which claim it ships enabled. A `--private` bucket alone therefore meant "any signed-in user", not "own files only". Without the second migration, any authenticated user could have read any other user's resume once Feature 06 started uploading.
-- **`turbopack.root` in `next.config.ts` is required — do not remove.** There is a stray `package-lock.json` in the user's home directory (`/Users/ddevv15/package-lock.json`). Turbopack walks up looking for lockfiles, so without the explicit root it resolves to the home folder and traces everything in it. Cosmetic note: `path.join(__dirname)` is a redundant single-arg wrapper.
-- **Testing RLS with real sessions required a workaround.** No OAuth credentials available, and email/password signup is blocked because `require_email_verification = true` while `[auth.smtp] enabled = false` — verification can never complete. Solved by creating a throwaway schema-only backend branch, disabling verification on the branch only, testing there, then deleting it. Production auth config was never modified.
+- **The tree did not compile on arrival** — `TS2741: Property 'initialValues' is missing` in `page.tsx`. Fixed by wiring the page to the DB.
+- **`.upsert()` looks fake but is real.** Grepping `@insforge/sdk` returns zero matches; `Database` wraps `postgrest-js`, which supplies it. Grep `node_modules/@supabase/postgrest-js` instead. Don't re-panic.
+- **Partial upserts are what make two write paths safe.** PostgREST writes **only the columns in the payload**, so `saveProfile` can't clobber the resume and `saveResume` can't clobber the form — no transaction needed. Also lets a resume be uploaded before the profile row exists (every column but `id` is nullable/defaulted). Needs **both** INSERT and UPDATE grants + policies, since upsert compiles to `INSERT … ON CONFLICT DO UPDATE`; Feature 04 granted both.
+- **`<input type="file">` fires no `change` event when the same file is picked twice.** Retrying after a rejection, or replacing a resume with an identically-named file, was a dead click. Any future file input must clear its value.
+- **`posthog.shutdown()` would have silently broken analytics.** The server client is a process-wide singleton; `shutdown()` tears it down for every subsequent request in the process. All 10 call sites correctly use `flush()` — the doc was wrong, not the code.
+- `storage.upload()` returns `{ url, key, size, bucket, uploadedAt, mimeType? }`; `url` and `key` are both non-optional. It takes `File | Blob` — **not** a Buffer (matters for Feature 08).
 
 ## Current state
 
-- **Phase 1 — Foundation is complete.** 01 Homepage, 02 Auth, 03 PostHog, 04 Database Schema all done. Phase 2 not started.
-- **RLS is proven, not just inspected — 12/12 assertions passed** under real authenticated sessions: user B sees zero rows across all tables (including when filtering explicitly by user A's id), B is blocked from inserting a row owned by A (confirms `WITH CHECK`), `DELETE` returns 403 (confirms the narrowed grant surface), `anon` returns 401.
-- Catalog-verified: 4 tables `rowsecurity=true`, 11 policies correctly shaped with no `USING (true)`, `anon` privilege count 0, 12 indexes, trigger present, 11 CHECK constraints, `storage.objects` RLS on with 4 path-scoped policies, security advisor clean.
-- **`AGENTS.md` is broken.** Something overwrote it with generic InsForge SDK boilerplate (136 lines, opens with `alwaysApply: true` and a "Download Template" instruction), destroying the project's read-order, "Rules That Never Change", and skills list. `agent1.md` was also deleted. Both recoverable from commit `35cc0ab`. **Not yet restored.**
-- **The InsForge admin API key was rotated** this session (it was hardcoded in `.mcp.json`, untracked but unignored). The key lives in three places — `.mcp.json`, `.env.local`, `.insforge/project.json` — all updated and verified working. `.mcp.json` is now gitignored. Old key expired 2026-07-22T12:26Z.
-- **Everything is uncommitted.** Last commit is still `35cc0ab`. Uncommitted: `migrations/`, `types/`, `.gitignore`, the three context doc corrections, plus the pre-existing Phase 1 work.
+- **Feature 06 is code-complete and reviewed.** `tsc --noEmit` exit 0, `eslint` exit 0 across the full tree, `next build` clean with `/profile` correctly dynamic (`ƒ`). No hardcoded hex, no raw Tailwind palette classes anywhere.
+- **The runtime round-trip has still never executed.** No row written to InsForge, no object to Storage. This is the one open critical item.
+- **1 review finding intentionally not fixed:** orphaned storage objects. A failed `remove()` is logged and swallowed — the deliberate trade (an orphan is recoverable, a lost pointer is not). No sweep exists.
+- **Working tree not committed.** Features 05 + 06 together: new `app/profile/`, `components/profile/`, `components/layout/NavLinks.tsx`, `actions/profile.ts`, `lib/profile.ts`; modified `Navbar.tsx` + five context docs.
+- Phase status: **Phase 1 complete; Phase 2 → 05 and 06 done, 07 next.**
 
 ## Next session starts with
 
-1. **Restore `AGENTS.md`** — `git checkout HEAD -- AGENTS.md agent1.md`. Until this is done, the project's operating rules are missing from context.
-2. Then start **05 Profile Page — Full UI** (Phase 2): build the complete profile page with mock data, no save logic. Run `/architect` first per the project rules.
+**Decide how to close the runtime verification gap — it is the only thing between "compiles" and "works".** Two options were put to the developer and neither was chosen yet:
+
+1. **Developer drives it** — `npm run dev`, sign up with a real inbox, walk the checklist. Slower but exercises the real path including email verification.
+2. **Claude drives it via a throwaway InsForge branch** — the technique Features 04 and email/password both used (schema-only branch, verification disabled, script the round-trip, delete the branch). Faster, but creates and destroys backend state, so it **needs explicit developer authorisation** before touching project infrastructure.
+
+The checklist either way:
+
+1. Fresh user → `/profile` shows an empty form; banner does **not** list `EMAIL`
+2. Fill required fields → Save → reload → values pre-fill from DB
+3. At 100% the banner **disappears entirely**
+4. `profile_completed` fires **exactly once**; saving again does not re-fire
+5. Upload a PDF → reload → persists; `resume_pdf_url` *and* `resume_pdf_key` both populated
+6. Upload a **second** PDF → old Storage object gone (no accumulation)
+7. Non-PDF and >5MB both rejected client-side with no network call
+8. Profile save after a resume upload does **not** null the resume columns, and vice versa
+
+Then **07 AI Profile Extraction from Resume** — but see the blocker below first.
 
 ## Open questions
 
-- Production `NEXT_PUBLIC_APP_URL` is still undefined, and the production OAuth redirect URL is not in `insforge.toml`'s `allowed_redirect_urls` (only `http://localhost:3000/api/auth/callback`). Both needed before deploying.
-- Email/password auth is non-functional project-wide (`require_email_verification = true` + SMTP disabled). Harmless while the app is OAuth-only, but it blocks any future email/password path.
-- Backend is on a `nano` instance and returns intermittent 504s on migration commands. Both migrations applied cleanly on retry. Instance upgrade was offered and declined (costs money).
-- Should the uncommitted work be committed as one Phase 1 checkpoint or split per feature?
+- **Feature 07 is blocked until a resume can be read back.** The `resumes` bucket is private with path-scoped RLS, so `resume_pdf_url` is not directly fetchable and no `storage.download()` / signed-URL helper exists. 07 cannot parse a PDF it cannot fetch. Build this first.
+- **Nested border-radius, unanswered since Feature 05** — Work Experience is 3 levels (`rounded-2xl` → `rounded-xl` → `rounded-md`) against ui-rules' "max 2 levels", but design-mandated. Flattening the role box is ~1 line. **Awaiting a yes/no.**
+- **Form-field unification** — `TextField`'s input token matches `AuthPanel`'s, but profile uses an uppercase caption and AuthPanel does not. Reconcile casing before sharing one component.
+- **`recharts` (Feature 17) is not on code-standards' approved-dependency list** — that list is a hard gate; add it there before installing.
+
+_Full prerequisite list (missing deps, env vars, `lib/utils.ts`, `/find-jobs` route, deployment items) now lives in `progress-tracker.md` → "Open Items Carried Into Phase 2+" rather than only here._
+
+_Parked (developer closed these): inbox-test the emailed-code happy paths on first real email; delete the merged `feat/database-schema` branch; the `nano` backend intermittently 504s on slow DB ops — retry works, re-query state rather than re-running blindly._

@@ -623,30 +623,51 @@ posthog.capture("job_found", {
 
 ### Server Setup
 
+The server client is a **process-wide singleton** — `getPostHogClient()` lazily creates it once and reuses it across requests.
+
 ```typescript
 // lib/posthog-server.ts
 import { PostHog } from "posthog-node";
 
-export const createPostHogServer = () =>
-  new PostHog(process.env.NEXT_PUBLIC_POSTHOG_KEY!, {
-    host: process.env.NEXT_PUBLIC_POSTHOG_HOST!,
-    flushAt: 1, // send immediately
-    flushInterval: 0, // no batching — Next.js functions are short-lived
-  });
+let posthogClient: PostHog | null = null;
 
-// Always use and shutdown in the same function
-const posthog = createPostHogServer();
+export function getPostHogClient() {
+  if (!posthogClient) {
+    posthogClient = new PostHog(
+      process.env.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN!,
+      {
+        host: process.env.NEXT_PUBLIC_POSTHOG_HOST,
+        flushAt: 1, // send immediately
+        flushInterval: 0, // no batching — Next.js functions are short-lived
+      },
+    );
+  }
+  return posthogClient;
+}
+
+// Capture, then flush — never shutdown
+const posthog = getPostHogClient();
 posthog.capture({
   distinctId: userId,
   event: "company_researched",
   properties: { userId, jobId, company },
 });
-await posthog.shutdown(); // required — ensures event is sent
+await posthog.flush(); // required — ensures the event leaves the process
 ```
+
+**⚠️ Use `flush()`, never `shutdown()`.**
+`shutdown()` tears the client down permanently. Because the client is a shared
+singleton, calling it in a request handler would kill analytics for **every
+subsequent request in that process** — silently, with no error. `flush()` sends
+pending events and leaves the client usable. This corrects an earlier version of
+this document that prescribed `shutdown()`; all 10 call sites in the codebase use
+`flush()`.
 
 **Rules:**
 
-- Always call `await posthog.shutdown()` in server-side functions — events are lost without it
+- Always `await posthog.flush()` after capturing in server-side code — events are lost without it
+- **Never call `posthog.shutdown()`** anywhere in this project
+- The client is obtained via `getPostHogClient()` — never construct `new PostHog()` inline
 - `flushAt: 1` and `flushInterval: 0` always set on server client
 - Event names must match exactly the list in `code-standards.md`
 - Always include `userId` as a property on every server-side event
@@ -686,14 +707,25 @@ const ResumePDF = ({ profile }: { profile: Profile }) => (
 // Generate buffer
 const buffer = await renderToBuffer(<ResumePDF profile={profile} />)
 
-// Upload directly to InsForge Storage
-await insforge.storage
+// upload() accepts File | Blob — NOT a Buffer. Wrap it.
+const file = new Blob([buffer], { type: 'application/pdf' })
+
+// Remove the superseded object first (or after — see the Storage section);
+// uploads never overwrite, they auto-rename on key collision.
+const { data } = await insforge.storage
   .from('resumes')
-  .upload(`${userId}/resume.pdf`, buffer, {
-    contentType: 'application/pdf',
-    upsert: true
-  })
+  .upload(`${userId}/resume.pdf`, file)
+
+// Persist BOTH — the returned key may differ from the path requested
+await saveResumePointer(data.url, data.key)
 ```
+
+**⚠️ The two-argument signature is the real one.** An earlier version of this
+section showed `upload(path, buffer, { contentType, upsert: true })` — none of
+that options object exists, and `upsert` in particular does not overwrite. See
+this file's Storage section, which is authoritative. Feature 06 implements the
+working pattern in `actions/profile.ts:saveResume`; reuse it rather than
+re-deriving.
 
 **Supported CSS properties:**
 Only use these — others are silently ignored:
@@ -705,7 +737,8 @@ Only use these — others are silently ignored:
 - Always use `renderToBuffer` — not `renderToStream` or `PDFDownloadLink`
 - PDF generation only in `app/api/resume/` routes
 - Generated buffer uploaded directly to InsForge Storage — never written to disk
-- Always save public URL to DB after upload
+- Wrap the Buffer in a `Blob` before uploading — `upload()` takes `File | Blob`
+- Always save **both** `data.url` and `data.key` to `profiles` — there is no `getPublicUrl()`
 
 ---
 

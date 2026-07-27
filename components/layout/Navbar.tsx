@@ -1,14 +1,14 @@
+import { type JSX } from "react";
 import Link from "next/link";
 import { LayoutGrid } from "lucide-react";
+import { NavLinks } from "@/components/layout/NavLinks";
 import { NavbarCTA } from "@/components/layout/NavbarCTA";
 
-const navItems = [
-  { label: "Dashboard", href: "/dashboard" },
-  { label: "Find Jobs", href: "/find-jobs" },
-  { label: "Profile", href: "/profile" },
-];
+type Props = {
+  variant?: "marketing" | "app";
+};
 
-export function Navbar() {
+export function Navbar({ variant = "marketing" }: Props): JSX.Element {
   return (
     <header className="h-16 w-full border-b border-border bg-surface">
       <div className="mx-auto flex h-full max-w-[1440px] items-center justify-between px-6">
@@ -21,19 +21,9 @@ export function Navbar() {
           </span>
         </Link>
 
-        <nav className="hidden items-center gap-8 md:flex">
-          {navItems.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className="text-sm font-medium text-text-dark transition-colors hover:text-accent"
-            >
-              {item.label}
-            </Link>
-          ))}
-        </nav>
+        <NavLinks />
 
-        <NavbarCTA />
+        {variant === "marketing" && <NavbarCTA />}
       </div>
     </header>
   );

@@ -106,8 +106,8 @@ Wire profile form to InsForge DB.
 **Logic:**
 
 - Server Action in actions/profile.ts saves all form fields to profiles table
-- Resume PDF uploaded to InsForge Storage at resumes/{user_id}/resume.pdf with upsert: true
-- resume_pdf_url saved to profiles table after upload
+- Resume PDF uploaded to InsForge Storage at resumes/{user_id}/resume.pdf — one active resume per user, replacing rather than accumulating (**there is no `upsert` option**; see library-docs.md Storage — uploads auto-rename on key collision and the old object must be explicitly removed)
+- resume_pdf_url **and resume_pdf_key** saved to profiles table after upload
 - is_complete set to true when all required fields are filled
 - Completion percentage and missing fields calculated and saved
 - Form pre-fills with existing data on return visits
@@ -149,8 +149,8 @@ Generate a clean professional PDF resume from current profile data using GPT-4o.
   - Polished work experience bullet points
   - Clean professional language throughout
 - @react-pdf/renderer renders GPT-4o output into clean single-page PDF using renderToBuffer()
-- Buffer uploaded to InsForge Storage at resumes/{user_id}/resume.pdf with upsert: true
-- resume_pdf_url updated in profiles table
+- Buffer wrapped in a `Blob` (upload() takes File | Blob, not Buffer) and uploaded to InsForge Storage at resumes/{user_id}/resume.pdf — **no `upsert` option exists**; reuse the replace-and-remove flow already implemented in `actions/profile.ts:saveResume` rather than re-deriving it
+- resume_pdf_url **and resume_pdf_key** updated in profiles table
 
 ---
 

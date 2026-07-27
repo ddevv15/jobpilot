@@ -12,7 +12,7 @@
 | AI model                       | OpenAI GPT-4o            | Matching, research synthesis, extraction         |
 | Analytics                      | PostHog                  | Event tracking and dashboard charts              |
 | PDF generation                 | @react-pdf/renderer      | Resume PDF rendering                             |
-| Styling                        | Tailwind CSS + shadcn/ui | UI components and styling                        |
+| Styling                        | Tailwind CSS             | UI components and styling                        |
 | Language                       | TypeScript strict        | Throughout                                       |
 
 ---
@@ -68,7 +68,6 @@
 │   ├── profile.ts                         → Profile save + update
 │   └── jobs.ts                            → Job status updates
 ├── components/
-│   ├── ui/                                → shadcn/ui components only
 │   ├── layout/
 │   │   ├── Navbar.tsx
 │   │   └── Footer.tsx
@@ -83,8 +82,10 @@
 │   ├── profile/
 │   │   ├── ProfileForm.tsx
 │   │   ├── ResumeUpload.tsx
-│   │   ├── ResumePreview.tsx
-│   │   └── CompletionIndicator.tsx
+│   │   ├── CompletionIndicator.tsx
+│   │   ├── TextField.tsx                  → shared form field primitives —
+│   │   ├── SelectField.tsx                   reuse these for every new form
+│   │   └── TagInput.tsx
 │   ├── find-jobs/
 │   │   ├── SearchControls.tsx
 │   │   ├── JobsTable.tsx
@@ -111,6 +112,20 @@
 
 ---
 
+**shadcn/ui is deliberately not used.** Earlier versions of this document listed
+it in the stack and reserved `components/ui/` for it, but it was never installed
+(no `components.json`, no Radix / `clsx` / `tailwind-merge`) and every component
+built so far is hand-rolled against the `@theme` tokens in `globals.css`.
+Installing it now would violate code-standards' "never install a package without
+a clear reason" and fork the styling approach mid-project. Build new UI by
+matching `ui-registry.md`, not by reaching for shadcn.
+
+**`ResumePreview.tsx` was also removed from this sketch** — it was specified but
+never built, and nothing in `build-plan.md` requires it. Resume display currently
+lives inside `ResumeUpload.tsx`.
+
+---
+
 ## System Boundaries
 
 | Folder        | Owns                                                                                                   |
@@ -118,7 +133,7 @@
 | `app/`        | Pages and API routes only. No business logic.                                                          |
 | `agent/`      | All agent logic. Adzuna discovery, company research, matching, extraction. Nothing here touches React. |
 | `actions/`    | Server Actions for UI-triggered mutations only. Profile save, profile update.                          |
-| `components/` | UI only. No data fetching logic. No direct DB calls.                                                   |
+| `components/` | UI only. No data fetching logic. No direct **database** calls. **Storage uploads are the one exception** — Client Components upload via the browser client so the request carries the user's token for Storage RLS (see InsForge Client Pattern below and `library-docs.md`). Reads still come from Server Components via props. |
 | `lib/`        | Third party client initialisation and shared utilities only.                                           |
 | `types/`      | TypeScript types shared across the project.                                                            |
 

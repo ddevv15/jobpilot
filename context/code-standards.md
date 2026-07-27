@@ -241,13 +241,18 @@ All PostHog events must use these exact event names. Never invent new event name
 | `password_reset_completed` | New password set via reset code            | —                                         |
 | `user_signed_out`      | Sign out completed successfully                | —                                         |
 
+### Implemented — Phase 2 (Profile)
+
+| Event               | When                                                                                                          | Key Properties |
+| ------------------- | ------------------------------------------------------------------------------------------------------------- | -------------- |
+| `profile_completed` | The save that first flips a profile to complete (all 10 required fields). Fires once, on the false→true `is_complete` transition — never re-fires on later saves. | userId         |
+
 ### Planned — later phases (not yet implemented)
 
 | Event                | When                                        | Key Properties             |
 | --------------------- | ------------------------------------------ | -------------------------- |
 | `job_search_started` | Find Jobs button clicked                   | userId, jobTitle, location |
 | `job_found`          | Each job discovered and saved              | userId, source, matchScore |
-| `profile_completed`  | User saves complete profile for first time | userId                     |
 | `company_researched` | Company research dossier generated         | userId, jobId, company     |
 
 These events are the only events in this project. Do not add more without updating this list first.
@@ -276,10 +281,21 @@ All environment variables defined in `.env.local` for development. Never hardcod
 | `OPENAI_API_KEY`                | agent/ functions       |
 | `ADZUNA_APP_ID`                 | lib/adzuna.ts          |
 | `ADZUNA_APP_KEY`                | lib/adzuna.ts          |
-| `NEXT_PUBLIC_POSTHOG_KEY`       | lib/posthog-client.ts  |
-| `NEXT_PUBLIC_POSTHOG_HOST`      | lib/posthog-client.ts  |
+| `NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN` | lib/posthog-server.ts, instrumentation-client.ts |
+| `NEXT_PUBLIC_POSTHOG_HOST`      | lib/posthog-server.ts, instrumentation-client.ts |
+| `INSFORGE_API_KEY`              | Tooling only (InsForge CLI / MCP) — never referenced by app code |
 
 `NEXT_PUBLIC_` prefix means the variable is exposed to the browser. Never add `NEXT_PUBLIC_` to secret keys.
+
+**There is no `lib/posthog-client.ts`.** The browser client is initialised in
+`instrumentation-client.ts` at the project root (Next.js 16's client
+instrumentation hook), not in `lib/`. The PostHog token variable is
+`NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN` — an earlier version of this table said
+`NEXT_PUBLIC_POSTHOG_KEY` in `lib/posthog-client.ts`; neither existed.
+
+Variables for unbuilt features (`OPENAI_API_KEY`, `ADZUNA_*`, `BROWSERBASE_*`)
+are listed above as the contract for when those features land — they are **not
+yet present** in `.env.local`.
 
 ---
 
